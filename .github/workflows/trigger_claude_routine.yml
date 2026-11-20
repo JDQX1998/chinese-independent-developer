@@ -16,22 +16,32 @@ jobs:
       - name: 触发 Claude Routine
         env:
           ROUTINE_TOKEN: ${{ secrets.CLAUDE_ROUTINE_TOKEN }}
+          FIRE_URL: https://api.anthropic.com/v1/claude_code/routines/trig_01QqQ9rpKCEVLB5R78v83umP/fire
         run: |
           set -euo pipefail
           if [ -z "${ROUTINE_TOKEN}" ]; then
-            echo "::error title=缺少 repository secret::仓库未配置 CLAUDE_ROUTINE_TOKEN（Settings → Secrets and variables → Actions），请求会带着空 Bearer 发出去并 401。"
+            echo "::error title=缺少 repository secret::仓库未配置 CLAUDE_ROUTINE_TOKEN。获取方式：claude.ai/code/routines → 该任务 → Edit → Trigger 行 + → API → Generate token（只显示一次）。"
             exit 1
           fi
           body=$(mktemp)
           code=$(curl -sS --max-time 60 -o "$body" -w '%{http_code}' \
-            -X POST "https://api.anthropic.com/v1/claude_code/routines/trig_01QqQ9rpKCEVLB5R78v83umP/fire" \
+            -X POST "${FIRE_URL}" \
             -H "Authorization: Bearer ${ROUTINE_TOKEN}" \
+            -H "anthropic-beta: experimental-cc-routine-2026-04-01" \
             -H "anthropic-version: 2023-06-01" \
-            -H "Content-Type: application/json")
+            -H "Content-Type: application/json" \
+            -d '{}')
           echo "HTTP ${code}"
           cat "$body"; echo
           if [ "${code}" -lt 200 ] || [ "${code}" -ge 300 ]; then
-            echo "::error title=Claude Routine 触发失败::HTTP ${code}"
+            case "${code}" in
+              401) echo "::error title=Claude Routine 触发失败（401）::token 无效或已被轮换 —— 去 claude.ai/code/routines 该任务 Edit → API trigger → Regenerate，再把新 token 写回 secret。";;
+              404) echo "::error title=Claude Routine 触发失败（404）::Fire URL 里的 trigger id 对不上 —— 复制 Edit 面板中的 Fire URL 替换 FIRE_URL。";;
+              *)   echo "::error title=Claude Routine 触发失败::HTTP ${code}";;
+            esac
             exit 1
           fi
           echo "✅ 已触发 Claude Routine（HTTP ${code}）" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat "$body" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
